@@ -6,7 +6,7 @@ import numpy as np
 import argparse
 import tensorflow as tf
 import tensorflow.contrib.slim as slim
-
+import random
 
 from tensorpack import *
 from tensorpack.tfutils.summary import add_moving_summary
@@ -277,6 +277,11 @@ class TripletModel(EmbeddingModel):
     @staticmethod
     def get_data():
         ds = MnistTriplets('train')
+        s=0
+	for i in range(10):
+	   print(len(ds.data_dict[i]))
+	   s = s + len(ds.data_dict[i])
+	print(s)
         ds = BatchData(ds, 128 // 3)
         return ds
 
@@ -382,6 +387,7 @@ def visualize(model_path, model, algo_name):
     for offset, dp in enumerate(ds.get_data()):
         digit, label = dp
         prediction = pred(digit)[0]
+	print(prediction)
         embed[offset * BATCH_SIZE:offset * BATCH_SIZE + BATCH_SIZE, ...] = prediction
         images[offset * BATCH_SIZE:offset * BATCH_SIZE + BATCH_SIZE, ...] = digit
         offset += 1
@@ -411,6 +417,82 @@ def visualize(model_path, model, algo_name):
     plt.savefig('%s.jpg' % algo_name)
 
 
+def evaluate_random(model_path, model, algo_name):
+    global embed_dim
+    ensemble_size = 15
+    correct = 0
+    total = 0
+    BATCH_SIZE = 64
+    #NUM_BATCHES = 50000
+
+    pred = OfflinePredictor(PredictConfig(
+            session_init=get_model_loader(model_path),
+            model=model(),
+            input_names=['input'],
+            output_names=['emb']))
+
+    # get train data
+    dt = dataset.Mnist('train')
+    dt = BatchData(dt, BATCH_SIZE)
+    #dt = get_test_data()
+    dt.reset_state()
+    print('loaded training data')
+
+    train_data = {}
+    for offset,dp in enumerate(dt.get_data()):
+        #print(offset)
+        img, label = dp
+        prediction = pred(img)
+        embedding = prediction[0]
+        for i in range(BATCH_SIZE):
+            gt = label[i]
+            if gt not in train_data:
+                train_data[gt] = [embedding[i]]
+            else:
+                train_data[gt].append(embedding[i])
+        offset += 1
+        #if offset == NUM_BATCHES:
+        #    break
+
+    total_tr_data = 0
+    for label in train_data:
+        print(str(label) + ': '+ str(len(train_data[label])))
+        total_tr_data += len(train_data[label])
+    print('total training data: ' + str(total_tr_data))
+
+    ds = get_test_data()
+    ds.reset_state()
+    print('loaded test data')
+
+    for dp in ds.get_data():
+        img, label = dp
+        embed_test_batch = pred(img)[0]
+        dist = {}
+        for i in range(BATCH_SIZE):
+            embed_test = embed_test_batch[i]
+            # choose an image randomly from every class
+            for l in train_data:
+                dist[l] = 0
+                r = random.sample(range(0,len(train_data[l])), ensemble_size)
+                for sample in r:
+                    dist[l] += np.linalg.norm(embed_test-train_data[l][sample])
+                dist[l] = dist[l]/ensemble_size
+
+            min_value = min(dist.itervalues())
+            min_keys = [k for k in dist if dist[k] == min_value]
+            if len(min_keys)==1:
+                pred_class = min_keys[0]
+            else:
+                pred_class = min_keys[random.randint(0,len(min_keys)-1)]
+
+            if pred_class == label[i]:
+                correct += 1
+            total += 1
+
+    print('total test data: ' + str(total))
+    return correct, total
+
+
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--gpu', help='comma separated list of GPU(s) to use.')
@@ -418,6 +500,7 @@ if __name__ == '__main__':
     parser.add_argument('-a', '--algorithm', help='used algorithm', required=True,
                         choices=["siamese", "cosine", "triplet", "softtriplet", "center"])
     parser.add_argument('--visualize', help='export embeddings into an image', action='store_true')
+    parser.add_argument('--evaluate', help = 'compute accuracy', action='store_true')
     args = parser.parse_args()
 
     ALGO_CONFIGS = {"siamese": SiameseModel,
@@ -431,6 +514,10 @@ if __name__ == '__main__':
     with change_gpu(args.gpu):
         if args.visualize:
             visualize(args.load, ALGO_CONFIGS[args.algorithm], args.algorithm)
+	elif args.evaluate:
+            correct, total = evaluate_random(args.load, ALGO_CONFIGS[args.algorithm], args.algorithm)
+            print('accuracy: '+str(float(correct)*100/total) + '% = ' + str(correct) + '/' +str(total))
+
         else:
             config = get_config(ALGO_CONFIGS[args.algorithm], args.algorithm)
             if args.load:
