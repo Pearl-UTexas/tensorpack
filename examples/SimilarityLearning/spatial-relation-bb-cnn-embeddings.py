@@ -23,7 +23,7 @@ except ImportError:
     MATPLOTLIB_AVAIBLABLE = False
 
 embed_dim = 2
-optimizer = "SGD"
+opt = "SGD"
 learning_rate = 1e-3
 
 
@@ -203,27 +203,20 @@ def center_loss(embedding, label, num_classes, alpha=0.1, scope="center_loss"):
 
 class EmbeddingModel(ModelDesc):
     global embed_dim
-    global optimizer
-    def embed(self, x, b, nfeatures=embed_dim):
+    global opt
+    def embed(self, x, nfeatures=embed_dim):
         """Embed all given tensors into an nfeatures-dim space.  """
         list_split = 0
         if isinstance(x, list):
             list_split = len(x)
             x = tf.concat(x, 0)
 
-        list_split = 0
-        if isinstance(b, list):
-            list_split = len(b)
-            b = tf.concat(b, 0)
-
         # pre-process MNIST dataflow data
         #x = tf.expand_dims(x, 3)
         #x = x * 2 - 1
 
-        f=tf.concat(axis=1, values=[x,b])
-
         # the embedding network
-        net = slim.layers.fully_connected(f, 32, scope='fc1')
+        net = slim.layers.fully_connected(x, 32, scope='fc1')
         net = slim.layers.fully_connected(net, 16, scope='fc2')
         embeddings = slim.layers.fully_connected(net, nfeatures, activation_fn=None, scope='fc3')
 
@@ -236,14 +229,14 @@ class EmbeddingModel(ModelDesc):
     def optimizer(self):
         global learning_rate
         lr = tf.get_variable('learning_rate', initializer=learning_rate, trainable=False)
-        if optimizer=='SGD':
+        if opt=='SGD':
             return tf.train.GradientDescentOptimizer(lr)
-        elif optimizer=='Adam':
+        elif opt=='Adam':
             return tf.train.AdamOptimizer(lr)
-        elif optimizer=='Momentum':
+        elif opt=='Momentum':
             return tf.train.MomentumOptimizer(lr)
-        elif optimizer=='RMSProp':
-            return tf.train.RMSPropOptimizer(lr, momentum=0.5)
+        elif opt=='RMSProp':
+            return tf.train.RMSPropOptimizer(lr, momentum=0.9)
 
 
 class SiameseModel(EmbeddingModel):
@@ -254,24 +247,22 @@ class SiameseModel(EmbeddingModel):
         return ds
 
     def inputs(self):
-        return [tf.placeholder(tf.float32, (None, 4096), 'input'),
-                tf.placeholder(tf.float32, (None, 16), 'bb'),
-                tf.placeholder(tf.float32, (None, 4096), 'input_y'),
-                tf.placeholder(tf.float32, (None, 16), 'bb_y'),
+        return [tf.placeholder(tf.float32, (None, 4112), 'input'),
+                tf.placeholder(tf.float32, (None, 4112), 'input_y'),
                 tf.placeholder(tf.int32, (None,), 'label')]
 
     def build_graph(self, x, y, label):
+        global embed_dim
         # embed them
-        feat_x, bb_x = x
-        feat_y, bb_y = y
-        x_embed, y_embed = self.embed([feat_x, feat_y], [bb_x, bb_y], embed_dim)
+        single_input = x
+        x, y = self.embed([x, y], embed_dim)
 
         # tag the embedding of 'input' with name 'emb', just for inference later on
         with tf.variable_scope(tf.get_variable_scope(), reuse=True):
-            tf.identity(self.embed(feat_x, bb_x), name="emb")
+            tf.identity(self.embed(single_input, embed_dim), name="emb")
 
         # compute the actual loss
-        cost, pos_dist, neg_dist = contrastive_loss(x_embed, y_embed, label, 5., extra=True, scope="loss")
+        cost, pos_dist, neg_dist = contrastive_loss(x, y, label, 5., extra=True, scope="loss")
         cost = tf.identity(cost, name="cost")
 
         # track these values during training
@@ -281,14 +272,14 @@ class SiameseModel(EmbeddingModel):
 
 class CosineModel(SiameseModel):
     def build_graph(self, x, y, label):
-        feat_x, bb_x = x
-        feat_y, bb_y = y
-        x_embed, y_embed = self.embed([feat_x, feat_y], [bb_x, bb_y], embed_dim)
+        global embed_dim
+        single_input = x
+        x, y = self.embed([x, y], embed_dim)
 
         with tf.variable_scope(tf.get_variable_scope(), reuse=True):
-            tf.identity(self.embed(feat_x, bb_x), name="emb")
+            tf.identity(self.embed(single_input, embed_dim), name="emb")
 
-        cost = siamese_cosine_loss(x_embed, y_embed, label, scope="loss")
+        cost = siamese_cosine_loss(x, y, label, scope="loss")
         cost = tf.identity(cost, name="cost")
         add_moving_summary(cost)
         return cost
@@ -309,12 +300,9 @@ class TripletModel(EmbeddingModel):
         return ds
 
     def inputs(self):
-        return [(tf.placeholder(tf.float32, (None, 4096), 'input'),
-                tf.placeholder(tf.float32, (None, 16), 'bb')),
-                (tf.placeholder(tf.float32, (None, 4096), 'input_p'),
-                tf.placeholder(tf.float32, (None,16), 'bb_p')),
-                (tf.placeholder(tf.float32, (None, 4096), 'input_n'),
-                tf.placeholder(tf.float32, (None, 16), 'bb_n'))
+        return [tf.placeholder(tf.float32, (None, 4112), 'input'),
+                tf.placeholder(tf.float32, (None, 4112), 'input_p'),
+                tf.placeholder(tf.float32, (None, 4112), 'input_n'),
                 ]
 
     def loss(self, a, p, n):
@@ -323,13 +311,10 @@ class TripletModel(EmbeddingModel):
     def build_graph(self, a, p, n):
         global embed_dim
         single_input = a
-        feat_a, bb_a = a
-        feat_p, bb_p = p
-        feat_n, bb_n = n
         a, p, n = self.embed([a, p, n], embed_dim)
 
         with tf.variable_scope(tf.get_variable_scope(), reuse=True):
-            tf.identity(self.embed(feat_a, bb_a, embed_dim), name="emb")
+            tf.identity(self.embed(single_input, embed_dim), name="emb")
 
         cost, pos_dist, neg_dist = self.loss(a, p, n)
 
@@ -352,14 +337,13 @@ class CenterModel(EmbeddingModel):
         return ds
 
     def inputs(self):
-        return [tf.placeholder(tf.float32, (None, 4096), 'input'),
-                tf.placeholder(tf.float32, (None, 16), 'bb'),
+        return [tf.placeholder(tf.float32, (None, 4112), 'input'),
                 tf.placeholder(tf.int32, (None,), 'label')]
 
     def build_graph(self, x, label):
+        global embed_dim
         # embed them
-        f, bb = x
-        x = self.embed(f, bb, embed_dim)
+        x = self.embed(x, embed_dim)
         x = tf.identity(x, name='emb')
 
         # compute the embedding loss
@@ -421,8 +405,8 @@ def visualize(model_path, model, algo_name):
     ds.reset_state()
 
     for offset, dp in enumerate(ds.get_data()):
-        feat, bb, label = dp
-        prediction = pred([feat, bb])[0]
+        data, label = dp
+        prediction = pred(data)[0]
 	print(prediction)
         embed[offset * BATCH_SIZE:offset * BATCH_SIZE + BATCH_SIZE, ...] = prediction
         labels[offset * BATCH_SIZE:offset * BATCH_SIZE + BATCH_SIZE, ...] = label
@@ -514,8 +498,8 @@ def evaluate_random(model_path, model, algo_name):
     train_data = {}
     for offset,dp in enumerate(dt.get_data()):
         #print(offset)
-        feat, bb, label = dp
-        prediction = pred([feat, bb])
+        data, label = dp
+        prediction = pred(data)
         embedding = prediction[0]
         for i in range(BATCH_SIZE):
             gt = label[i]
@@ -538,8 +522,8 @@ def evaluate_random(model_path, model, algo_name):
     print('loaded test data')
 
     for dp in ds.get_data():
-        feat, bb, label = dp
-        embed_test_batch = pred([feat, bb])[0]
+        data, label = dp
+        embed_test_batch = pred(data)[0]
         dist = {}
         for i in range(BATCH_SIZE):
             embed_test = embed_test_batch[i]
@@ -576,7 +560,7 @@ if __name__ == '__main__':
     parser.add_argument('--evaluate', help = 'compute accuracy', action='store_true')
     parser.add_argument('--dim', help='dimensionality of the embedding space', type=int)
     parser.add_argument('--modelname', help = 'model directory name', type=str)
-    parser.add_argument('--optimizer', help = 'Optimizer', type=str)
+    parser.add_argument('--opt', help = 'Optimizer', type=str)
     parser.add_argument('--lr', help='learning rate', type=float)
     args = parser.parse_args()
 
