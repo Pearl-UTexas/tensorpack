@@ -87,3 +87,7 @@ target/
 
 .idea/
 *.diff
+
+
+examples/SimilarityLearning/features/*
+examples/SimilarityLearning/data/*
