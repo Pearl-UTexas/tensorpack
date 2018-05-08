@@ -35,7 +35,7 @@ def get_digits_by_label(features, labels, bb):
         bb_data.append(bb_clazz)
         feature_data.append(features_clazz)
     #return data_dict
-    # TODO: combine feat and bb into one vector
+    # TODO: combine feat and bb into one vector 
     return feature_data, bb_data
 
 
