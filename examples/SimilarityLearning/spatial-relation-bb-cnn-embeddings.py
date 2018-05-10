@@ -243,7 +243,7 @@ class SiameseModel(EmbeddingModel):
     @staticmethod
     def get_data():
         ds = DatasetPairs('data/amt_train.json','train')
-        ds = BatchData(ds, 128 // 2) # mini batch gradient descent
+        ds = BatchData(ds, 128 // 2) # for mini batch gradient descent
         return ds
 
     def inputs(self):
@@ -296,7 +296,7 @@ class TripletModel(EmbeddingModel):
 	    s = s + len(ds.data_dict[i])
 	    print(s)
         """
-        ds = BatchData(ds, 128 // 3)    #128
+        ds = BatchData(ds, 128 // 3)    #128 #mini-batch 
         return ds
 
     def inputs(self):
@@ -332,8 +332,9 @@ class CenterModel(EmbeddingModel):
     @staticmethod
     def get_data():
         #ds = dataset.Mnist('train')
-        ds = Dataset('data/amt_train.json','train')    
-        ds = BatchData(ds, 128)
+        ds = get_test_data('data/amt_train.json', 'train')
+	#print(ds.size()) 
+        #ds = BatchData(ds, 128)   # mini-batch
         return ds
 
     def inputs(self):
@@ -347,9 +348,9 @@ class CenterModel(EmbeddingModel):
         x = tf.identity(x, name='emb')
 
         # compute the embedding loss
-        emb_cost = center_loss(x, label, 10, 0.01)
+        emb_cost = center_loss(x, label, 12, 0.01)
         # compute the classification loss
-        logits = slim.layers.fully_connected(tf.nn.relu(x), 10, activation_fn=None, scope='logits')
+        logits = slim.layers.fully_connected(tf.nn.relu(x), 12, activation_fn=None, scope='logits')
 
         cls_cost = tf.reduce_mean(tf.nn.sparse_softmax_cross_entropy_with_logits(logits=logits, labels=label),
                                   name='classification_costs')

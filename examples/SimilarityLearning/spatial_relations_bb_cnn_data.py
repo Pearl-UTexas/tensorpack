@@ -4,6 +4,7 @@
 # Author: tensorpack contributors
 
 import numpy as np
+from tensorpack.dataflow import BatchData
 import sys
 sys.path.append('utils/')
 from amt import Dataset
@@ -12,6 +13,7 @@ import random
 num_relations = 12
 
 def get_test_data(pathFile, data_type='test', batch=128):
+    #TODO: combine VGG features and BB coordinates into one vector
     ds = Dataset(pathFile, data_type, shuffle=True)
     ds = BatchData(ds, batch)
     return ds
@@ -20,6 +22,7 @@ def get_test_data(pathFile, data_type='test', batch=128):
 def get_digits_by_label(features, labels, bb):
     global num_relations
     data_dict = []
+    data_size = 0
     for clazz in range(0, num_relations):
         #clazz_filter = np.where(labels == clazz)
         #data_dict.append(list(images[clazz_filter].reshape((-1, 28, 28))))
@@ -28,10 +31,11 @@ def get_digits_by_label(features, labels, bb):
         #features_clazz = [features[i] for i in clazz_filter]
         #bb_clazz = [bb[i] for i in clazz_filter]
         data_clazz = [np.concatenate((features[i], bb[i]),axis=0) for i in clazz_filter]
+	data_size = data_size + len(data_clazz)
         data_dict.append(data_clazz)
     #return data_dict
     # TODO: combine feat and bb into one vector 
-
+    print('Size of training data: '+str(data_size))
     return data_dict
 
 
