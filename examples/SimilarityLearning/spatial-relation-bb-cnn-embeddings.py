@@ -25,7 +25,7 @@ except ImportError:
 embed_dim = 2
 opt = "SGD"
 learning_rate = 1e-3
-
+train_data_embeddings = {}
 
 def contrastive_loss(left, right, y, margin, extra=False, scope="constrastive_loss"):
     r"""Loss for Siamese networks as described in the paper:
@@ -216,8 +216,8 @@ class EmbeddingModel(ModelDesc):
         #x = x * 2 - 1
 
         # the embedding network
-        net = slim.layers.fully_connected(x, 32, scope='fc1')
-        net = slim.layers.fully_connected(net, 16, scope='fc2')
+        net = slim.layers.fully_connected(x, 1024, scope='fc1')
+        net = slim.layers.fully_connected(net, 1024, scope='fc2')
         embeddings = slim.layers.fully_connected(net, nfeatures, activation_fn=None, scope='fc3')
 
         # if "x" was a list of tensors, then split the embeddings
@@ -237,6 +237,12 @@ class EmbeddingModel(ModelDesc):
             return tf.train.MomentumOptimizer(lr)
         elif opt=='RMSProp':
             return tf.train.RMSPropOptimizer(lr, momentum=0.9)
+
+    #def update_train_embed_dict
+
+    #def compute_accuracy(self):
+    # use updated dict of embeddings for each training example
+    # get embeddings of test data and compare against train data to assign accuracy
 
 
 class SiameseModel(EmbeddingModel):
@@ -317,8 +323,10 @@ class TripletModel(EmbeddingModel):
             tf.identity(self.embed(single_input, embed_dim), name="emb")
 
         cost, pos_dist, neg_dist = self.loss(a, p, n)
-
         cost = tf.identity(cost, name="cost")
+
+        pred = OnlinePredictor(input_tensors=emb, output_tensors=self.compute_accuracy())
+
         add_moving_summary(pos_dist, neg_dist, cost)
         return cost
 
@@ -361,6 +369,25 @@ class CenterModel(EmbeddingModel):
         return total_cost
 
 
+class VisualizeTestSet(Callback):
+    def _setup_graph(self):
+        self.pred = self.trainer.get_predictor(
+            ['inputA', 'inputB'], ['A_recon/viz', 'B_recon/viz'])
+
+    def _before_train(self):
+        global args
+        self.val_ds = get_data(args.data, isTrain=False)
+        self.val_ds.reset_state()
+
+    def _trigger(self):
+        idx = 0
+        for iA, iB in self.val_ds.get_data():
+            vizA, vizB = self.pred(iA, iB)
+            self.trainer.monitors.put_image('testA-{}'.format(idx), vizA)
+            self.trainer.monitors.put_image('testB-{}'.format(idx), vizB)
+        idx += 1
+
+
 def get_config(model, algorithm_name):
 
     extra_display = ["cost"]
@@ -372,8 +399,10 @@ def get_config(model, algorithm_name):
         model=model(),
         callbacks=[
             #ModelSaver(),
-            ModelSaver(max_to_keep=20, keep_checkpoint_every_n_hours=2)
+            ModelSaver(max_to_keep=20, keep_checkpoint_every_n_hours=2)#,
             #ScheduledHyperParamSetter('learning_rate', [(10, 1e-5), (20, 1e-6)])
+            #PeriodicTrigger(VisualizeTestSet(), every_k_epochs=3
+            #PeriodicTrigger(model.compute_accuracy, every_k_epochs=3)
         ],
         extra_callbacks=[
             MovingAverageSummary(),
@@ -475,14 +504,9 @@ def visualize(model_path, model, algo_name):
     plt.title('Embedding using %s-loss' % algo_name)
     plt.savefig('%s.jpg' % algo_name)
 
-def evaluate_random(model_path, model, algo_name):
+def get_train_data_embeddings(model_path, model, algo_name):
+    global train_data_embeddings
     global embed_dim
-    ensemble_size = 15
-    correct = 0
-    total = 0
-    BATCH_SIZE = 128
-    #NUM_BATCHES = 50000
-
     pred = OfflinePredictor(PredictConfig(
             session_init=get_model_loader(model_path),
             model=model(),
@@ -522,6 +546,26 @@ def evaluate_random(model_path, model, algo_name):
     ds.reset_state()
     print('loaded test data')
 
+    if (mode=='test'):
+        train_data_embeddings = train_data
+
+    return train_data
+
+def evaluate_avg_dist_per_class(model_path, model, algo_name, mode='train'):
+    global embed_dim
+    global train_data_embeddings
+    ensemble_size = 15
+    correct = 0
+    total = 0
+    BATCH_SIZE = 128
+    #NUM_BATCHES = 50000
+
+    pred = OfflinePredictor(PredictConfig(
+            session_init=get_model_loader(model_path),
+            model=model(),
+            input_names=['input'],
+            output_names=['emb']))
+
     for dp in ds.get_data():
         data, label = dp
         embed_test_batch = pred(data)[0]
@@ -531,9 +575,9 @@ def evaluate_random(model_path, model, algo_name):
             # choose an image randomly from every class
             for l in train_data:
                 dist[l] = 0
-                r = random.sample(range(0,len(train_data[l])), ensemble_size)
+                r = random.sample(range(0,len(train_data_embeddings[l])), ensemble_size)
                 for sample in r:
-                    dist[l] += np.linalg.norm(embed_test-train_data[l][sample])
+                    dist[l] += np.linalg.norm(embed_test-train_data_embeddings[l][sample])
                 dist[l] = dist[l]/ensemble_size
 
             min_value = min(dist.itervalues())
@@ -549,6 +593,51 @@ def evaluate_random(model_path, model, algo_name):
 
     print('total test data: ' + str(total))
     return correct, total
+
+def evaluate_knn(model_path, model, algo_name):
+    global embed_dim
+    global train_data_embeddings
+    ensemble_size = 15
+    correct = 0
+    total = 0
+    BATCH_SIZE = 128
+    k = 11
+    #NUM_BATCHES = 50000
+
+    pred = OfflinePredictor(PredictConfig(
+            session_init=get_model_loader(model_path),
+            model=model(),
+            input_names=['input'],
+            output_names=['emb']))
+
+    for dp in ds.get_data():
+        data, label = dp
+        embed_test_batch = pred(data)[0]
+        dist = {}
+        for i in range(BATCH_SIZE):
+            embed_test = embed_test_batch[i]
+            # choose an image randomly from every class
+            for l in train_data:
+                dist[l] = {}
+                r = np.random.choice(len(train_data_embeddings[l]), ensemble_size)
+                for sample in r:
+                    dist[l].append(np.linalg.norm(embed_test-train_data_embeddings[l][sample]))
+             
+            # TODO: each training data class votes for the class of the test data 
+            min_value = min(dist.itervalues())
+            min_keys = [k for k in dist if dist[k] == min_value]
+            if len(min_keys)==1:
+                pred_class = min_keys[0]
+            else:
+                pred_class = min_keys[random.randint(0,len(min_keys)-1)]
+
+            if pred_class == label[i]:
+                correct += 1
+            total += 1
+
+    print('total test data: ' + str(total))
+    return correct, total
+
 
 
 if __name__ == '__main__':
@@ -579,9 +668,9 @@ if __name__ == '__main__':
     with change_gpu(args.gpu):
         if args.visualize:
             visualize(args.load, ALGO_CONFIGS[args.algorithm], args.algorithm)
-	elif args.evaluate:
+        elif args.evaluate:
             correct, total = evaluate_random(args.load, ALGO_CONFIGS[args.algorithm], args.algorithm)
-            print('accuracy: '+str(float(correct)*100/total) + '% = ' + str(correct) + '/' +str(total))
+            print('average distance to class accuracy: '+str(float(correct)*100/total) + '% = ' + str(correct) + '/' +str(total))
 
         else:
             config = get_config(ALGO_CONFIGS[args.algorithm], args.algorithm)

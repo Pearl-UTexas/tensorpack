@@ -19,7 +19,7 @@ def get_test_data(pathFile, data_type='test', batch=128):
     return ds
 
 
-def get_digits_by_label(features, labels, bb):
+def get_digits_by_label(inputs, labels):
     global num_relations
     data_dict = []
     data_size = 0
@@ -28,13 +28,13 @@ def get_digits_by_label(features, labels, bb):
         #data_dict.append(list(images[clazz_filter].reshape((-1, 28, 28))))
         clazz_filter = [i for i, j in enumerate(labels) if j == clazz]
         
+        data_clazz = [inputs[i] for i in clazz_filter]
         #features_clazz = [features[i] for i in clazz_filter]
         #bb_clazz = [bb[i] for i in clazz_filter]
-        data_clazz = [np.concatenate((features[i], bb[i]),axis=0) for i in clazz_filter]
-	data_size = data_size + len(data_clazz)
+        #data_clazz = [np.concatenate((features[i], bb[i]),axis=0) for i in clazz_filter]
+        data_size = data_size + len(data_clazz)
         data_dict.append(data_clazz)
-    #return data_dict
-    # TODO: combine feat and bb into one vector 
+
     print('Size of training data: '+str(data_size))
     return data_dict
 
@@ -55,7 +55,8 @@ class DatasetPairs(Dataset):
     def __init__(self, pathFile, train_or_test):
         super(DatasetPairs, self).__init__(pathFile, train_or_test, shuffle=False)
         # now categorize these digits
-        self.data_dict = get_digits_by_label(self.features, self.labels, self.bb)
+        #self.data_dict = get_digits_by_label(self.features, self.labels, self.bb)
+        self.data_dict = get_digits_by_label(self.inputs, self.labels)
 
     def pick(self, label):
         idx = self.rng.randint(len(self.data_dict[label]))

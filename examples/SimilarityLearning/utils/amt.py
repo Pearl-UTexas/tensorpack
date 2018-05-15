@@ -42,6 +42,7 @@ class Dataset(RNGDataFlow):
         self.features = []
         self.labels = []
         self.bb = []
+        self.inputs = []
 
         idxs = np.arange(len(data))
         if self.shuffle:
@@ -66,6 +67,9 @@ class Dataset(RNGDataFlow):
             self.labels.append(int(element['label']))
             self.bb.append(np.array(element['bb']))
 
+        for k in idxs:
+            self.inputs.append(np.concatenate((self.features[k], self.bb[k]),axis=0))
+
     def size(self):
         return len(self.labels)
     
@@ -75,8 +79,9 @@ class Dataset(RNGDataFlow):
             #self.rng.shuffle(idxs)
             random.shuffle(idxs)
 
-        for k in idxs:
-            yield [self.features[k], self.bb[k], self.labels[k]]
+        for k in idxs:            
+            #yield [self.features[k], self.bb[k], self.labels[k]]
+            yield [self.inputs[k], self.labels[k]]
 
 if __name__ == '__main__':
     ds = Dataset('/home/asaran/research/tensorpack/examples/SimilarityLearning/data/amt_train.json', 'train',
