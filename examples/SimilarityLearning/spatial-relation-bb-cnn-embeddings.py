@@ -7,7 +7,7 @@ import argparse
 import tensorflow as tf
 import tensorflow.contrib.slim as slim
 import random
-
+import sys
 from tensorpack import *
 from tensorpack.tfutils.summary import add_moving_summary
 from tensorpack.utils.gpu import change_gpu
@@ -204,6 +204,10 @@ def center_loss(embedding, label, num_classes, alpha=0.1, scope="center_loss"):
 class EmbeddingModel(ModelDesc):
     global embed_dim
     global opt
+
+    #def __init__(self):
+    #    self.train_embed_dict = {}
+
     def embed(self, x, nfeatures=embed_dim):
         """Embed all given tensors into an nfeatures-dim space.  """
         list_split = 0
@@ -223,6 +227,13 @@ class EmbeddingModel(ModelDesc):
         # if "x" was a list of tensors, then split the embeddings
         if list_split > 0:
             embeddings = tf.split(embeddings, list_split, 0)
+        #    x = tf.split(x, list_split, 0)
+        #    assert(len(x)==len(embeddings))
+            #print("Input tensor list size: " + str(len(x))+ "****")
+        #    for i in range(len(x)):
+        #	    self.train_embed_dict[x[i]] = embeddings[i]
+        #else:
+        #	self.train_embed_dict[x] = embeddings
 
         return embeddings
 
@@ -240,15 +251,18 @@ class EmbeddingModel(ModelDesc):
 
     #def update_train_embed_dict
 
-    #def compute_accuracy(self):
+    #def compute_train_accuracy(self):
     # use updated dict of embeddings for each training example
     # get embeddings of test data and compare against train data to assign accuracy
+
+    #def compute_test_accuracy(self):
 
 
 class SiameseModel(EmbeddingModel):
     @staticmethod
     def get_data():
         ds = DatasetPairs('data/amt_train.json','train')
+        #print ds.size()
         ds = BatchData(ds, 128 // 2) # for mini batch gradient descent
         return ds
 
@@ -340,9 +354,9 @@ class CenterModel(EmbeddingModel):
     @staticmethod
     def get_data():
         #ds = dataset.Mnist('train')
-        ds = get_test_data('data/amt_train.json', 'train')
-	#print(ds.size()) 
-        #ds = BatchData(ds, 128)   # mini-batch
+        ds = Dataset.get_data()
+		#print(ds.size()) 
+        ds = BatchData(ds, 128)   # mini-batch
         return ds
 
     def inputs(self):
@@ -369,23 +383,58 @@ class CenterModel(EmbeddingModel):
         return total_cost
 
 
-class VisualizeTestSet(Callback):
+class ComputeAccuracy(Callback):
+    def __init__(self):
+        self.train_embed_dict = {}
+        self.i = 0
+
     def _setup_graph(self):
+        #self.pred = self.trainer.get_predictor(
+        #    ['inputA', 'inputB'], ['A_recon/viz', 'B_recon/viz'])
         self.pred = self.trainer.get_predictor(
-            ['inputA', 'inputB'], ['A_recon/viz', 'B_recon/viz'])
+            ['input'], ['emb'])
 
     def _before_train(self):
-        global args
-        self.val_ds = get_data(args.data, isTrain=False)
+        self.val_ds = get_test_data('data/amt_test.json', 'test')
         self.val_ds.reset_state()
+
+        self.train_ds = get_test_data('data/amt_train.json', 'train')
+        self.train_ds.reset_state()
+
+    def evaluate(self, data_point):
+    	pass
 
     def _trigger(self):
         idx = 0
-        for iA, iB in self.val_ds.get_data():
-            vizA, vizB = self.pred(iA, iB)
-            self.trainer.monitors.put_image('testA-{}'.format(idx), vizA)
-            self.trainer.monitors.put_image('testB-{}'.format(idx), vizB)
-        idx += 1
+        for train_data, train_label in self.train_ds.get_data():
+            train_embedding = self.pred(train_data)
+            for e,l in zip(train_embedding, train_label):
+                if l in self.train_embed_dict:
+                    self.train_embed_dict[l].append(e)
+                else:
+                    self.train_embed_dict[l]=[e]
+
+
+        idx = 0
+        for test_data, test_label in self.val_ds.get_data():
+            #vizA = self.pred(iA, iB)
+            test_embedding = self.pred(test_data)
+            #self.trainer.monitors.put_image('testA-{}'.format(idx), vizA)
+            #self.trainer.monitors.put_image('testB-{}'.format(idx), vizB)
+            idx += 1
+        self.trainer.monitors.put_scalar("epoch_counter",self.i)
+        self.i = self.i + 1
+
+class TestCallback(Callback):
+    def __init__(self):
+    	self.i = 0
+
+	def _before_train(self):
+		self.i = 0
+
+	def _trigger(self):
+		self.trainer.monitors.put_scalar("epoch_counter",self.i)
+		self.i = self.i + 1
 
 
 def get_config(model, algorithm_name):
@@ -399,10 +448,10 @@ def get_config(model, algorithm_name):
         model=model(),
         callbacks=[
             #ModelSaver(),
-            ModelSaver(max_to_keep=20, keep_checkpoint_every_n_hours=2)#,
+            ModelSaver(max_to_keep=20, keep_checkpoint_every_n_hours=2),
             #ScheduledHyperParamSetter('learning_rate', [(10, 1e-5), (20, 1e-6)])
             #PeriodicTrigger(VisualizeTestSet(), every_k_epochs=3
-            #PeriodicTrigger(model.compute_accuracy, every_k_epochs=3)
+            PeriodicTrigger(ComputeAccuracy(), every_k_epochs=2)
         ],
         extra_callbacks=[
             MovingAverageSummary(),

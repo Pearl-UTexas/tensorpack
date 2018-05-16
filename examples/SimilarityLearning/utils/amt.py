@@ -70,14 +70,16 @@ class Dataset(RNGDataFlow):
         for k in idxs:
             self.inputs.append(np.concatenate((self.features[k], self.bb[k]),axis=0))
 
+        print "****************"+train_or_test+"*****************"
+
     def size(self):
         return len(self.labels)
     
     def get_data(self):
-        idxs = np.arange(len(self.features))
+        idxs = np.arange(len(self.inputs))
         if self.shuffle:
-            #self.rng.shuffle(idxs)
-            random.shuffle(idxs)
+            self.rng.shuffle(idxs)
+            #random.shuffle(idxs)
 
         for k in idxs:            
             #yield [self.features[k], self.bb[k], self.labels[k]]

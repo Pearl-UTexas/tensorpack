@@ -15,6 +15,7 @@ num_relations = 12
 def get_test_data(pathFile, data_type='test', batch=128):
     #TODO: combine VGG features and BB coordinates into one vector
     ds = Dataset(pathFile, data_type, shuffle=True)
+    print ds.size()
     ds = BatchData(ds, batch)
     return ds
 
@@ -69,6 +70,7 @@ class DatasetPairs(Dataset):
         return self.data_dict[label][idx1].astype(np.float32), self.data_dict[label][idx2].astype(np.float32)
 
     def get_data(self):
+        print "**************printing Siamese lable pairs"
         while True:
             y = self.rng.randint(2)
             if y == 0:
@@ -79,7 +81,7 @@ class DatasetPairs(Dataset):
 
             a = self.pick(pick_label)
             b = self.pick(pick_other)
-
+            #print pick_label, pick_other
             yield [a, b, y]
 
 
